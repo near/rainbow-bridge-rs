@@ -109,7 +109,6 @@ pub trait Prover {
         #[serializer(borsh)] receipt_data: Vec<u8>,
         #[serializer(borsh)] header_data: Vec<u8>,
         #[serializer(borsh)] proof: Vec<Vec<u8>>,
-        #[serializer(borsh)] skip_bridge_call: bool,
     ) -> bool;
 }
 
@@ -438,7 +437,6 @@ impl MintableFungibleToken {
                     receipt_data,
                     header_data,
                     proof,
-                    false, // Do not skip bridge call. This is only used for development and diagnostics.
                     &self.prover_account,
                     0,
                     env::prepaid_gas() / 3,

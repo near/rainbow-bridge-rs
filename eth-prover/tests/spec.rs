@@ -10,7 +10,7 @@ use utils::{
 
 fn setup_factory() -> (RuntimeStandalone, ExternalUser) {
     let (mut r, near) = new_root("near".into());
-    near.init_eth_client(&mut r, "eth-client".to_string(), true)
+    near.init_eth_client(&mut r, "eth-client".to_string())
         .unwrap();
     near.init_eth_prover(&mut r, "eth-prover".to_string(), "eth-client".to_string())
         .unwrap();
