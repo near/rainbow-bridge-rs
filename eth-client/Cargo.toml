@@ -30,3 +30,4 @@ indicatif = "0.14"
 [features]
 default = []
 expensive_tests = []
+skip_validate_ethash = []

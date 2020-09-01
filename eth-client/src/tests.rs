@@ -234,7 +234,6 @@ fn add_dags_merkle_roots() {
 
     let dmr = read_roots_collection();
     let contract = EthClient::init(
-        true,
         0,
         read_roots_collection().dag_merkle_roots,
         blocks[0].clone(),
@@ -265,7 +264,6 @@ fn add_blocks_2_and_3() {
         .collect();
 
     let mut contract = EthClient::init(
-        true,
         0,
         read_roots_collection().dag_merkle_roots,
         blocks[0].clone(),
@@ -300,7 +298,6 @@ fn add_400000_block_only() {
 
     let block_with_proof = read_block("./src/data/400000.json".to_string());
     let contract = EthClient::init(
-        true,
         400_000 / 30000,
         vec![block_with_proof.merkle_root],
         blocks[0].clone(),
@@ -326,7 +323,6 @@ fn add_two_blocks_from_8996776() {
             .collect();
 
     let mut contract = EthClient::init(
-        true,
         0,
         read_roots_collection().dag_merkle_roots,
         blocks[0].clone(),
@@ -373,7 +369,6 @@ fn add_2_blocks_from_400000() {
             .collect();
 
     let mut contract = EthClient::init(
-        true,
         400_000 / 30000,
         vec![blocks_with_proofs.first().unwrap().merkle_root],
         blocks[0].clone(),
@@ -427,7 +422,6 @@ fn predumped_block_can_be_added() {
     let first_block_with_proof = read_block(blocks_with_proofs.first().unwrap().1.to_string());
 
     let mut contract = EthClient::init(
-        true,
         start_block_height / 30000,
         vec![first_block_with_proof.merkle_root],
         first_block_with_proof.header_rlp.0.clone(),

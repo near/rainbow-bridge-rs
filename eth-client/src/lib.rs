@@ -60,9 +60,7 @@ pub struct HeaderInfo {
 #[near_bindgen]
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct EthClient {
-    /// Whether client validates the PoW when accepting the header. Should only be set to `false`
-    /// for debugging, testing, diagnostic purposes when used with Ganache.
-    validate_ethash: bool,
+
     /// The epoch from which the DAG merkle roots start.
     dags_start_epoch: u64,
     /// DAG merkle roots for the next several years.
@@ -106,7 +104,6 @@ impl Default for EthClient {
 impl EthClient {
     #[init]
     pub fn init(
-        #[serializer(borsh)] validate_ethash: bool,
         #[serializer(borsh)] dags_start_epoch: u64,
         #[serializer(borsh)] dags_merkle_roots: Vec<H128>,
         #[serializer(borsh)] first_header: Vec<u8>,
@@ -119,7 +116,6 @@ impl EthClient {
         let header_hash = header.hash.unwrap().clone();
         let header_number = header.number;
         let mut res = Self {
-            validate_ethash,
             dags_start_epoch,
             dags_merkle_roots,
             best_header_hash: header_hash.clone(),
@@ -352,7 +348,7 @@ impl EthClient {
         // 2. Added condition: header.parent_hash() == prev.hash()
         //
         U256((result.0).0.into()) < U256(ethash::cross_boundary(header.difficulty.0))
-            && (!self.validate_ethash
+            && (cfg!(feature = "skip_validate_ethash")
                 || (header.difficulty < header.difficulty * 101 / 100
                     && header.difficulty > header.difficulty * 99 / 100))
             && header.gas_used <= header.gas_limit
@@ -389,7 +385,8 @@ impl EthClient {
 
                 // Each two nodes are packed into single 128 bytes with Merkle proof
                 let node = &nodes[idx / 2];
-                if idx % 2 == 0 && self.validate_ethash {
+                #[cfg(not(feature = "skip_validate_ethash"))]
+                if idx % 2 == 0 {
                     // Divide by 2 to adjust offset for 64-byte words instead of 128-byte
                     assert_eq!(merkle_root, node.apply_merkle_proof((offset / 2) as u64));
                 };

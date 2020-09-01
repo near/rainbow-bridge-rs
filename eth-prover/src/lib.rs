@@ -120,7 +120,6 @@ impl EthProver {
         #[serializer(borsh)] receipt_data: Vec<u8>,
         #[serializer(borsh)] header_data: Vec<u8>,
         #[serializer(borsh)] proof: Vec<Vec<u8>>,
-        #[serializer(borsh)] skip_bridge_call: bool,
     ) -> PromiseOrValue<bool> {
         let log_entry: LogEntry = rlp::decode(log_entry_data.as_slice()).unwrap();
         let receipt: Receipt = rlp::decode(receipt_data.as_slice()).unwrap();
@@ -136,7 +135,7 @@ impl EthProver {
             proof,
             receipt_data,
         );
-        if verification_result && skip_bridge_call {
+        if verification_result && cfg!(test) {
             return PromiseOrValue::Value(true);
         } else if !verification_result {
             return PromiseOrValue::Value(false);
