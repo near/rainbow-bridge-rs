@@ -30,8 +30,7 @@ use near_sdk::json_types::U128;
 use near_sdk::{
     env, ext_contract, near_bindgen, AccountId, Balance, Promise, PromiseOrValue, StorageUsage,
 };
-#[cfg(test)]
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
@@ -114,7 +113,7 @@ pub trait Prover {
 }
 
 #[cfg(not(test))]
-#[derive(BorshDeserialize, BorshSerialize, Clone)]
+#[derive(BorshDeserialize, BorshSerialize, Deserialize, Serialize, Clone)]
 pub struct Proof {
     log_index: u64,
     log_entry_data: Vec<u8>,
@@ -394,6 +393,64 @@ impl MintableFungibleToken {
             .into()
     }
 
+    /// Mint the token with json instead of borsh
+    #[payable]
+    pub fn mint_with_json(&mut self, proof: Proof) -> PromiseOrValue<()> {
+        let initial_storage = env::storage_usage();
+        self.record_proof(&proof);
+        let current_storage = env::storage_usage();
+        let attached_deposit = env::attached_deposit();
+        let required_deposit =
+            Balance::from(current_storage - initial_storage) * STORAGE_PRICE_PER_BYTE;
+        let leftover_deposit = attached_deposit - required_deposit;
+        let Proof {
+            log_index,
+            log_entry_data,
+            receipt_index,
+            receipt_data,
+            header_data,
+            proof,
+        } = proof;
+        let event = EthEventData::from_log_entry_data(&log_entry_data);
+        assert_eq!(
+            event.locker_address,
+            self.locker_address,
+            "Event's address {} does not match locker address of this token {}",
+            hex::encode(&event.locker_address),
+            hex::encode(&self.locker_address),
+        );
+        env::log(format!("{}", event).as_bytes());
+        let EthEventData {
+            recipient, amount, ..
+        } = event;
+        if cfg!(test) {
+            // In unit test we don't do cross contract call into prover contract
+            self.finish_mint(true, recipient, amount.into());
+            PromiseOrValue::Value(())
+        } else {
+            PromiseOrValue::Promise(
+                prover::verify_log_entry(
+                    log_index,
+                    log_entry_data,
+                    receipt_index,
+                    receipt_data,
+                    header_data,
+                    proof,
+                    false, // Do not skip bridge call. This is only used for development and diagnostics.
+                    &self.prover_account,
+                    0,
+                    env::prepaid_gas() / 3,
+                )
+                .then(ext_fungible_token::finish_mint(
+                    recipient,
+                    amount.into(),
+                    &env::current_account_id(),
+                    leftover_deposit,
+                    env::prepaid_gas() / 3,
+                )),
+            )
+        }
+    }
     /// Mint the token, increasing the total supply given the proof that the mirror token was locked
     /// on the Ethereum blockchain.
     #[payable]
@@ -908,42 +965,72 @@ mod tests {
         );
     }
 
-    fn burn_common(owner: AccountId, sender: AccountId, total_supply: u128, burn_amount: u128, eth_recipient: &str) {
+    fn burn_common(
+        owner: AccountId,
+        sender: AccountId,
+        total_supply: u128,
+        burn_amount: u128,
+        eth_recipient: &str,
+    ) {
         let mut context = get_context(owner.clone());
         testing_env!(context.clone());
-        let mut contract = MintableFungibleToken::new_with_supply(owner.clone(), total_supply.into());
-        
+        let mut contract =
+            MintableFungibleToken::new_with_supply(owner.clone(), total_supply.into());
+
         context.storage_usage = env::storage_usage();
         context.attached_deposit = 1000 * STORAGE_PRICE_PER_BYTE;
         context.predecessor_account_id = sender;
         testing_env!(context.clone());
 
-        contract.burn(
-            burn_amount.into(),
-            eth_recipient.into(),
-        );
+        contract.burn(burn_amount.into(), eth_recipient.into());
         assert_eq!(contract.get_balance(alice()).0, total_supply - 1000);
         assert_eq!(contract.get_total_supply().0, total_supply - 1000);
     }
 
     #[test]
     fn test_burn() {
-        burn_common(alice(), alice(), 1_000_000_000_000_000u128, BURN_AMOUNT, "0123456789abcdef0123456789abcdef01234567")
+        burn_common(
+            alice(),
+            alice(),
+            1_000_000_000_000_000u128,
+            BURN_AMOUNT,
+            "0123456789abcdef0123456789abcdef01234567",
+        )
     }
 
     #[test]
     #[should_panic(expected = "recipient should be a hex: OddLength")]
     fn test_burn_invalid_recepient() {
-        burn_common(alice(), alice(), 1_000_000_000_000_000u128, BURN_AMOUNT, "0123456789abcdef0123456789abcdef0123456")
+        burn_common(
+            alice(),
+            alice(),
+            1_000_000_000_000_000u128,
+            BURN_AMOUNT,
+            "0123456789abcdef0123456789abcdef0123456",
+        )
     }
 
     #[test]
     #[should_panic(expected = "Not enough balance")]
     fn test_burn_insufficient_balance() {
-        burn_common(alice(), carol(), 1_000_000_000_000_000u128, BURN_AMOUNT, "0123456789abcdef0123456789abcdef01234567")
+        burn_common(
+            alice(),
+            carol(),
+            1_000_000_000_000_000u128,
+            BURN_AMOUNT,
+            "0123456789abcdef0123456789abcdef01234567",
+        )
     }
 
-    fn mint_common(owner: AccountId, sender: AccountId, receiver: AccountId, total_supply: u128, locker_address: [u8; 20], proof: Proof, double_mint: bool) {
+    fn mint_common(
+        owner: AccountId,
+        sender: AccountId,
+        receiver: AccountId,
+        total_supply: u128,
+        locker_address: [u8; 20],
+        proof: Proof,
+        double_mint: bool,
+    ) {
         let mut context = get_context(owner.clone());
         testing_env!(context.clone());
         let mut contract = MintableFungibleToken::new_with_supply(owner, total_supply.into());
@@ -954,50 +1041,64 @@ mod tests {
         context.predecessor_account_id = sender.clone();
         testing_env!(context.clone());
 
-        assert_eq!(
-            contract.get_balance(receiver.clone()).0,
-            0
-        );
+        assert_eq!(contract.get_balance(receiver.clone()).0, 0);
         contract.mint(proof.clone());
         if double_mint {
             contract.mint(proof);
         }
-        assert_eq!(
-            contract.get_balance(receiver.clone()).0,
-            1000
-        );
+        assert_eq!(contract.get_balance(receiver.clone()).0, 1000);
         assert_eq!(contract.get_total_supply().0, total_supply + 1000);
     }
 
     fn proof_from_file(path: &str) -> Proof {
-        serde_json::from_reader(
-            std::fs::File::open(std::path::Path::new(path)).unwrap(),
-        ).unwrap()
+        serde_json::from_reader(std::fs::File::open(std::path::Path::new(path)).unwrap()).unwrap()
     }
 
     #[test]
     fn test_mint() {
-        mint_common(alice(), alice(), rainbow_bridge_eth_on_near_prover(), 1_000_000_000_000_000u128, [
-            196, 199, 73, 127, 190, 26, 136, 104, 65, 161, 149, 165, 214, 34, 205, 96, 5, 60, 19,
-            118,
-        ], proof_from_file("data/proof.json"), false);
+        mint_common(
+            alice(),
+            alice(),
+            rainbow_bridge_eth_on_near_prover(),
+            1_000_000_000_000_000u128,
+            [
+                196, 199, 73, 127, 190, 26, 136, 104, 65, 161, 149, 165, 214, 34, 205, 96, 5, 60,
+                19, 118,
+            ],
+            proof_from_file("data/proof.json"),
+            false,
+        );
     }
 
     #[test]
     #[should_panic(expected = "Event cannot be reused for minting.")]
     fn test_mint_no_double_mint() {
-        mint_common(alice(), alice(), rainbow_bridge_eth_on_near_prover(), 1_000_000_000_000_000u128, [
-            196, 199, 73, 127, 190, 26, 136, 104, 65, 161, 149, 165, 214, 34, 205, 96, 5, 60, 19,
-            118,
-        ], proof_from_file("data/proof.json"), true);
+        mint_common(
+            alice(),
+            alice(),
+            rainbow_bridge_eth_on_near_prover(),
+            1_000_000_000_000_000u128,
+            [
+                196, 199, 73, 127, 190, 26, 136, 104, 65, 161, 149, 165, 214, 34, 205, 96, 5, 60,
+                19, 118,
+            ],
+            proof_from_file("data/proof.json"),
+            true,
+        );
     }
 
     #[test]
     #[should_panic(expected = "does not match locker address of this token")]
     fn test_mint_wrong_locker_address() {
-        mint_common(alice(), alice(), rainbow_bridge_eth_on_near_prover(), 1_000_000_000_000_000u128, [
-            100; 20
-        ], proof_from_file("data/proof.json"), false);
+        mint_common(
+            alice(),
+            alice(),
+            rainbow_bridge_eth_on_near_prover(),
+            1_000_000_000_000_000u128,
+            [100; 20],
+            proof_from_file("data/proof.json"),
+            false,
+        );
     }
 
     #[test]
@@ -1005,9 +1106,17 @@ mod tests {
         expected = "Finish transfer is only allowed to be called by the contract itself"
     )]
     fn test_mint_wrong_sender() {
-        mint_common(carol(), carol(), rainbow_bridge_eth_on_near_prover(), 1_000_000_000_000_000u128, [
-            196, 199, 73, 127, 190, 26, 136, 104, 65, 161, 149, 165, 214, 34, 205, 96, 5, 60, 19,
-            118,
-        ], proof_from_file("data/proof.json"), false);
+        mint_common(
+            carol(),
+            carol(),
+            rainbow_bridge_eth_on_near_prover(),
+            1_000_000_000_000_000u128,
+            [
+                196, 199, 73, 127, 190, 26, 136, 104, 65, 161, 149, 165, 214, 34, 205, 96, 5, 60,
+                19, 118,
+            ],
+            proof_from_file("data/proof.json"),
+            false,
+        );
     }
 }
