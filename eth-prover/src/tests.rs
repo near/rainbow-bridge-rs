@@ -27,9 +27,6 @@ mod tests {
         }
     }
 
-    // TESTS
-
-    use borsh::BorshSerialize;
     use near_sdk::MockedBlockchain;
     use near_sdk::{testing_env, VMContext};
 
@@ -80,7 +77,7 @@ mod tests {
             stream.append(item);
         }
         stream.out()
-    }).collect();
+    }).collect::<Vec<Vec<u8>>>();
 
         if let PromiseOrValue::Value(true) = contract.verify_log_entry(
             log_index,
